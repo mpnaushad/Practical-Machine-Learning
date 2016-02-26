@@ -1,0 +1,170 @@
+---
+title: "Machine Learning Project: Prediction Assignment"
+output: html_document
+---
+# Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website - [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har)
+
+The purpose of this report is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+## Source of Data
+
+The training data for this project are available here: 
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data are available here:
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) 
+
+# Loading Data and Perform quick analysis
+
+The following Libraries were used for this project.
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+```
+
+Load the same seed with the following line of code:
+```{r}
+set.seed(12345)
+```
+
+## Data Load
+```{r}
+if (!file.exists("./data/pml-training.csv")) {
+    fileURL <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+    download.file(fileURL, destfile='./data/pml-training.csv', method = 'libcurl')
+}
+
+training <- read.csv("./data/pml-training.csv", na.strings = c("NA", ""))
+
+if (!file.exists("./data/pml-testing.csv")) {
+    fileURL <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+    download.file(fileURL, destfile='./data/pml-testing.csv', method = 'libcurl')
+}
+
+testing <- read.csv("./data/pml-testing.csv", na.strings = c("NA", ""))
+
+dim(training)
+summary(training$classe)
+```
+
+There are *19622* records with *160* variables. The variable we will be predicting on is *classe*, and the data is splited up between the five classes.
+
+# Building Model
+
+## Split the Training Data
+
+Here, the training data is splitting up into a training set to train the model and a testing set to test the performanace of the model -
+```{r}
+inTrain = createDataPartition(y=training$classe, p=0.6, list=FALSE)
+modelTraining = training[inTrain,]
+modelTesting = training[-inTrain,]
+dim(modelTraining)
+dim(modelTesting)
+```
+
+There are *159* variables available to use for training the model.
+
+## Cleaning Data
+
+In order to cleaning up the data, the below code removes *Near *Zero *Variance variables from both training and testing data
+```{r}
+nzv <- nearZeroVar(modelTraining, saveMetrics=TRUE)
+modelTraining <- modelTraining[,nzv$nzv==FALSE]
+
+nzv<- nearZeroVar(modelTesting,saveMetrics=TRUE)
+modelTesting <- modelTesting[,nzv$nzv==FALSE]
+```
+
+The first column of the Training data set is also removed. 
+```{r}
+modelTraining <- modelTraining[c(-1)]
+```
+
+As part of data cleaning, below code is used to clean up variables with more than 60% NA
+```{r}
+# creating a copy of training set to iterate in loop
+trainingT <- modelTraining                                                            
+# for every column in the training dataset
+for(i in 1:length(modelTraining)) {                                                   
+  # check if NAs > 60% of total observations      
+  if( sum( is.na( modelTraining[, i] ) ) /nrow(modelTraining) >= .6 ) {         
+    for(j in 1:length(trainingT)) {
+      # look for the matching column
+      if( length( grep(names(modelTraining[i]), names(trainingT)[j]) ) ==1)  {  
+        # Remove the column when matching column      
+        trainingT <- trainingT[ , -j]                                         
+            }   
+        } 
+    }
+}
+
+# Set back to the original variable name
+modelTraining <- trainingT
+dim(modelTraining)
+```
+
+Here same cleaning as above is performed for modelTesting and Testing data set
+```{r}
+clean1 <- colnames(modelTraining)
+# remove the classe column
+clean2 <- colnames(modelTraining[, -58])      
+# allow only variables in modelTesting that are also in modelTraining
+modelTesting <- modelTesting[clean1]          
+# allow only variables in testing that are also in modelTraining
+testing <- testing[clean2]                    
+
+dim(modelTesting)
+dim(testing)
+```
+
+In order to ensure proper functioning of Decision Trees and RandomForest algorithm with the Test data set, the below code is used to coerce the data into the same type.
+```{r}
+for (i in 1:length(testing) ) {
+        for(j in 1:length(modelTraining)) {
+        if( length( grep(names(modelTraining[i]), names(testing)[j]) ) ==1)  {
+            class(testing[j]) <- class(modelTraining[i])
+        }      
+    }      
+}
+
+# To make sure coercion works, following code is used -
+testing <- rbind(modelTraining[2, -58] , testing) 
+testing <- testing[-1,]
+dim(testing)
+```
+
+# Prediction
+
+## Prediction with Decision Tree
+```{r}
+set.seed(12345)
+modelFitA <- rpart(classe ~ ., data=modelTraining, method="class")
+fancyRpartPlot(modelFitA)
+```
+
+```{r}
+predictionsA <- predict(modelFitA, modelTesting, type = "class")
+confusionMatrix(predictionsA, modelTesting$classe)
+```
+
+## Prediction with Random Forests
+```{r}
+set.seed(12345)
+modelFitB <- randomForest(classe ~ ., data=modelTraining)
+predictionB <- predict(modelFitB, modelTesting, type = "class")
+confusionMatrix(predictionB, modelTesting$classe)
+```
+
+As we see from the confusion matrix data, Random Forests gave an accuracy in the myTesting dataset of *99.89%*, and accuracy from Decision Trees is *87.89%*. Therefore, Random Forests yielded better accuracy with out of sample error (100 - 99.89) = *0.11%*
+
+# Predicting Results on Test Data
+```{r}
+predictionTestData <- predict(modelFitB, testing, type = "class")
+predictionTestData
+```
